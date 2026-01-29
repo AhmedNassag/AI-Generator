@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 import inquirer
-
+import shutil
 # Import custom modules for ClickUp and LLM integration
 try:
     from ClickUpIntegration import get_task
@@ -168,8 +168,8 @@ FIELD_TYPES = {
         "col": 6,
         "hasOptions": True,
     },
-    "Team Select": {
-        "formType": "team-select",
+    "user Select": {
+        "formType": "user-select",
         "validation": "required",
         "updateValidation": "required",
         "tableDisplay": "text",
@@ -178,8 +178,8 @@ FIELD_TYPES = {
         "col": 6,
         "hasOptions": True,
     },
-    "User Select": {
-        "formType": "user-select",
+    "team Select": {
+        "formType": "team-select",
         "validation": "required",
         "updateValidation": "required",
         "tableDisplay": "text",
@@ -471,46 +471,167 @@ def generate_form_fields(fields: List[Dict], name_lower: str) -> str:
     """Generate form fields for frontend."""
     form_fields = []
     
-    for field in fields:
+    print(f"\n🔍🔍🔍 [DEBUG] generate_form_fields START")
+    print(f"🔍 Total fields: {len(fields)}")
+    print(f"🔍 name_lower: '{name_lower}'")
+    
+    for i, field in enumerate(fields):
+        print(f"\n🔍🔍🔍 [DEBUG] Processing field {i+1}")
+        print(f"🔍 Field data: {json.dumps(field, indent=2)}")
+        
+        field_type = field.get("type", "")
+        print(f"🔍 field_type: '{field_type}'")
+        
+        field_info = FIELD_TYPES.get(field_type, {})
+        print(f"🔍 field_info: {field_info}")
+        
+        has_options = field_info.get("hasOptions", False)
+        print(f"🔍 has_options: {has_options}")
+        
         field_obj = f'''      {{
         name: "{field["name"]}",
         label: this.$t("{name_lower}.{field["name"]}"),
         type: "{field["formType"]}",
         col: {field.get("col", 6)}'''
         
+        print(f"🔍 Initial field_obj created")
+        print(f"🔍 field_obj so far:\n{field_obj}")
+        
         # Process rules
         rules = field.get("rules", "")
+        print(f"🔍 rules from field: '{rules}'")
         if rules:
+            print(f"🔍 Rules exists, processing...")
             rules_array = rules.split('|')
+            print(f"🔍 rules_array: {rules_array}")
             if 'required' in rules_array:
                 field_obj += ',\n        rules: "required"'
+                print(f"🔍 Added 'required' rule")
             elif 'nullable' in rules_array:
                 field_obj += ',\n        rules: "nullable"'
+                print(f"🔍 Added 'nullable' rule")
             elif rules.strip():
                 field_obj += ',\n        rules: ""'
+                print(f"🔍 Added empty rules")
         
         # Handle dynamic options
-        if field.get("isDynamic"):
-            field_obj += f',\n        options: "{field["moduleName"]}",\n        optionLabel: "{field["optionLabel"]}"'
-            if field.get("optionValue"):
-                field_obj += f',\n        optionValue: "{field["optionValue"]}"'
-        elif field.get("options"):
-            options_str = format_options_array(field["options"])
-            field_obj += f',\n        options: {options_str},\n        optionLabel: "name"'
+        is_dynamic = field.get("isDynamic", False)
+        print(f"🔍 is_dynamic from field: {is_dynamic} (type: {type(is_dynamic)})")
+
+        module_name = ""
+        if(is_dynamic):
+            module_name = field.get("options", '')
+            
+        # module_name = field.get("moduleName", "")
+        print(f"🔍 module_name from field: '{module_name}' (type: {type(module_name)})")
+        print(f"🔍 module_name == 'None': {module_name == 'None'}")
+        print(f"🔍 module_name == None: {module_name is None}")
+        
+        # ✅ FIXED: التحقق بشكل صحيح من module_name
+        # يجب أن نتحقق من أن module_name ليس None ولا سلسلة نصية فارغة ولا سلسلة "None"
+        module_name_valid = (
+            module_name is not None and 
+            module_name != "" and 
+            module_name != "None" and 
+            module_name != "null"
+        )
+        
+        print(f"🔍 module_name_valid: {module_name_valid}")
+        print(f"🔍 Breakdown of module_name_valid:")
+        print(f"  - module_name is not None: {module_name is not None}")
+        print(f"  - module_name != '': {module_name != ''}")
+        print(f"  - module_name != 'None': {module_name != 'None'}")
+        print(f"  - module_name != 'null': {module_name != 'null'}")
+        
+        if is_dynamic and module_name_valid:
+            print(f"🔍✅ ENTERING DYNAMIC OPTIONS BLOCK!")
+            # ✅ FIXED: استخدام module_name مباشرة (ليست سلسلة "None")
+            field_obj += f',\n        options: "{module_name}"'
+            print(f"🔍 Added options: '{module_name}'")
+            
+            option_label = field.get("optionLabel", "name")
+            print(f"🔍 option_label: '{option_label}'")
+            field_obj += f',\n        optionLabel: "{option_label}"'
+            
+            option_value = field.get("optionValue", "id")
+            print(f"🔍 option_value: '{option_value}'")
+            if option_value:
+                field_obj += f',\n        optionValue: "{option_value}"'
+            else:
+                field_obj += f',\n        optionValue: "id"'
+        else:
+            print(f"🔍❌ NOT entering dynamic options block. Reasons:")
+            print(f"  - is_dynamic: {is_dynamic}")
+            print(f"  - module_name_valid: {module_name_valid}")
+            print(f"  - BOTH must be True, but is_dynamic AND module_name_valid = {is_dynamic and module_name_valid}")
+        
+        # Handle static options
+        print(f"\n🔍 Checking static options...")
+        print(f"  - has_options: {has_options}")
+        print(f"  - not is_dynamic: {not is_dynamic}")
+        print(f"  - has_options AND not is_dynamic: {has_options and not is_dynamic}")
+        
+        if has_options and not is_dynamic:
+            print(f"🔍✅ ENTERING STATIC OPTIONS BLOCK!")
+            options = field.get("options")
+            print(f"🔍 options from field: {options} (type: {type(options)})")
+            print(f"🔍 options is None: {options is None}")
+            print(f"🔍 options == 'None': {options == 'None'}")
+            print(f"🔍 options == 'null': {options == 'null'}")
+            
+            # التحقق من صحة الـ options
+            if options is not None and options != "None" and options != "null":
+                print(f"🔍 Options are valid (not None/null)")
+                
+                if isinstance(options, str) and options.strip():
+                    print(f"🔍 Options is string: '{options}'")
+                    field_obj += f',\n        options: "{options}"'
+                    field_obj += ',\n        optionLabel: "name"'
+                    print(f"🔍 Added string options")
+                elif isinstance(options, list) and len(options) > 0:
+                    print(f"🔍 Options is list with {len(options)} items")
+                    options_str = format_options_array(options)
+                    print(f"🔍 Formatted options string (first 200 chars): {options_str[:200]}...")
+                    field_obj += f',\n        options: {options_str}'
+                    field_obj += ',\n        optionLabel: "name"'
+                    print(f"🔍 Added list options")
+                else:
+                    print(f"🔍 Options type not handled: {type(options)}")
+                    print(f"🔍 Options value: {options}")
+            else:
+                print(f"🔍❌ Options are invalid or empty")
+                print(f"  - is None: {options is None}")
+                print(f"  - is 'None': {options == 'None'}")
+                print(f"  - is 'null': {options == 'null'}")
+        else:
+            print(f"🔍❌ NOT entering static options block")
         
         # Handle multiple select
-        if field.get("type") == "select" and field.get("multiple"):
+        multiple = field.get("multiple", False)
+        print(f"🔍 multiple: {multiple}")
+        if multiple:
             field_obj += ',\n        multiple: true'
+            print(f"🔍 Added multiple: true")
         
         # Add description
-        if field.get("description"):
-            field_obj += f',\n        description: "{field["description"]}"'
+        description = field.get("description", "")
+        print(f"🔍 description: '{description}'")
+        if description:
+            field_obj += f',\n        description: "{description}"'
+            print(f"🔍 Added description")
         
         field_obj += "\n      }"
         form_fields.append(field_obj)
+        
+        print(f"\n🔍🔍🔍 [DEBUG] Field {i+1} COMPLETE")
+        print(f"🔍 Final field object:\n{field_obj}")
     
-    return ",\n".join(form_fields)
-
+    result = ",\n".join(form_fields)
+    print(f"\n🔍🔍🔍 [DEBUG] generate_form_fields END")
+    print(f"🔍 Final result length: {len(result)} characters")
+    print(f"🔍 First 1000 chars of result:\n{result[:1000]}")
+    
+    return result
 def generate_translations(name_lower: str, fields: List[Dict]) -> Dict:
     """Generate translations for frontend."""
     translations = {
@@ -793,7 +914,7 @@ async def create_frontend_file(
         template_path = frontend_path_obj / "generator-setting-frontend" / template_file
         if not template_path.exists():
             raise FileNotFoundError(f"Template not found: {template_path}")
-     
+        
         template = template_path.read_text(encoding="utf-8")
         
         # Replace placeholders
@@ -947,30 +1068,108 @@ async def remove_import_statement(file_path: str, module_name: str) -> bool:
     except:
         return False
 
+
+
 async def remove_from_router_index(frontend_path: str, module_name: str) -> bool:
-    """Remove router entry for module."""
-    router_index_path = Path(frontend_path) / "src" / "router" / "index.js"
+    """Remove router entry for module - Case-insensitive search."""
+    router_index_path = Path(frontend_path) / "src" / "router" / "index.ts"
+    
+    print(f"   ℹ️  Removing '{module_name}' from router index...")
+    
+    if not router_index_path.exists():
+        print(f"   ❌ File not found")
+        return False
     
     try:
         content = router_index_path.read_text(encoding="utf-8")
-        name_kebab = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', module_name).lower()
         
-        # Remove import
-        content = re.sub(r'import\s+.*' + re.escape(module_name) + r'.*from\s+[\'"].*' + re.escape(name_kebab) + r'.*[\'"]\n?', '', content)
-        content = re.sub(r'import\s+' + re.escape(module_name) + r'Page\s+from\s+[\'"].*' + re.escape(name_kebab) + r'.*[\'"]\n?', '', content)
+        # البحث عن الاسم بجميع حالات الأحرف
+        # نحتاج إلى البحث عن 'userr' (بالصغيرة) في المسار
         
-        # Remove route object
-        content = re.sub(r'\{\s*path:\s*[\'"]/' + re.escape(name_kebab) + r'.*?component:\s*' + re.escape(module_name) + r'Page\s*\}', '', content, flags=re.DOTALL)
+        lines = content.splitlines()
+        new_lines = []
+        removed = False
         
-        # Clean up extra blank lines
-        content = re.sub(r'\n\n\n+', '\n\n', content)
+        for line in lines:
+            original_line = line
+            line_lower = line.lower()
+            
+            # 1. البحث عن import: يجب أن يحتوي على "import userr from" (بأي حالة أحرف)
+            #    ويجب أن يحتوي على "userr" في المسار
+            if 'import' in line_lower and module_name.lower() in line_lower and 'from' in line_lower:
+                # تحقق من أن الاسم يظهر ككلمة كاملة
+                if re.search(rf'\b{re.escape(module_name)}\b', line, re.IGNORECASE):
+                    # تحقق من وجود اسم الموديل في المسار (kebab-case)
+                    if re.search(rf'["\'][^"\']*{re.escape(module_name.lower())}[^"\']*["\']', line):
+                        print(f"   ✂️  Removing import: {line.strip()}")
+                        removed = True
+                        continue
+            
+            # 2. البحث عن spread operator: ...userr,
+            # نبحث عن النمط مع الفاصلة أو بدونها
+            spread_match = re.search(rf'\.\.\.{re.escape(module_name)}(,|$)', line, re.IGNORECASE)
+            if spread_match:
+                # إذا كان السطر يحتوي فقط على spread operator
+                if re.match(rf'^\s*\.\.\.{re.escape(module_name)},?\s*$', line, re.IGNORECASE):
+                    print(f"   ✂️  Removing spread: {line.strip()}")
+                    removed = True
+                    continue
+                
+                # إذا كان spread operator في منتصف السطر
+                # نزيل spread operator والفاصلة التي بعده
+                new_line = re.sub(rf'\s*\.\.\.{re.escape(module_name)}\s*,?\s*', '', line, flags=re.IGNORECASE)
+                
+                # تنظيف الفواصل الزائدة
+                new_line = re.sub(r'^\s*,\s*', '', new_line)  # فاصلة في البداية
+                new_line = re.sub(r',\s*$', '', new_line)     # فاصلة في النهاية
+                
+                if new_line != line:
+                    print(f"   ✂️  Modified: {line.strip()} → {new_line.strip() if new_line.strip() else '(empty)'}")
+                    removed = True
+                    line = new_line
+            
+            # إضافة السطر إذا بقي فيه محتوى
+            if line.strip():
+                new_lines.append(line)
         
-        router_index_path.write_text(content, encoding="utf-8")
+        if not removed:
+            print(f"   ℹ️  Module '{module_name}' not found")
+            return True
+        
+        # كتابة المحتوى الجديد
+        new_content = '\n'.join(new_lines)
+        
+        # تنظيف الأسطر الفارغة الزائدة
+        new_content = re.sub(r'\n\n\n+', '\n\n', new_content)
+        new_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', new_content)
+        
+        # إزالة المسافات الزائدة
+        new_content = '\n'.join([line.rstrip() for line in new_content.splitlines()])
+        
+        # إضافة سطر جديد في النهاية
+        if new_content and not new_content.endswith('\n'):
+            new_content += '\n'
+        
+        # كتابة الملف
+        router_index_path.write_text(new_content, encoding="utf-8")
+        print(f"   ✅ Successfully removed '{module_name}'")
+        
+        # التحقق النهائي
+        final_content = router_index_path.read_text(encoding="utf-8")
+        if re.search(rf'\b{re.escape(module_name)}\b', final_content, re.IGNORECASE):
+            # تحقق مما إذا كان الاسم المتبقي هو حقًا للموديل المطلوب
+            final_lines = final_content.splitlines()
+            for line in final_lines:
+                if re.search(rf'\b{re.escape(module_name)}\b', line, re.IGNORECASE):
+                    print(f"   ⚠️  Found potential remaining: {line.strip()}")
+            return False
+        
+        print(f"   ✓ Clean removal confirmed")
         return True
+        
     except Exception as error:
-        print(f"   ⚠️  Could not remove from router index: {error}")
+        print(f"   ❌ Error: {error}")
         return False
-
 async def delete_directory(dir_path: str) -> bool:
     """Delete directory recursively."""
     try:
@@ -1079,26 +1278,35 @@ async def delete_module(
         if delete_frontend:
             name_kebab = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', module_name).lower()
             
-            # Delete frontend files
-            frontend_files = [
-                (f"src/api/{name_kebab}.js", "frontend API"),
-                (f"src/pages/{module_name}Page.vue", "frontend page"),
-                (f"src/router/{name_kebab}.js", "frontend router")
+            frontend_folders = [
+                (f"src/API/{name_kebab}", "frontend API folder"),
+                (f"src/views/Page/{module_name}", "frontend page folder"),
+                (f"src/router/modules/{name_kebab}", "frontend router module folder")
             ]
             
-            for file_path_str, description in frontend_files:
-                file_path = Path(frontend_path) / file_path_str
+            results = {
+                "deletedFrontend": [],
+                "errors": []
+            }
+            
+            for folder_path_str, description in frontend_folders:
+                folder_path = Path(frontend_path) / folder_path_str
                 try:
-                    if file_path.exists():
-                        file_path.unlink()
-                        print(f"   ✓ Deleted {description}: {file_path_str}")
-                        results["deletedFrontend"].append(file_path_str)
-                except:
-                    print(f"   ⚠️  {description} file not found")
+                    if folder_path.exists() and folder_path.is_dir():
+                        # حذف المجلد وكل محتوياته
+                        shutil.rmtree(folder_path)
+                        print(f"   ✓ Deleted {description}: {folder_path_str}")
+                        results["deletedFrontend"].append(folder_path_str)
+                    else:
+                        print(f"   ℹ️  {description} folder not found: {folder_path_str}")
+                except Exception as e:
+                    error_msg = f"Failed to delete {description} folder: {str(e)}"
+                    print(f"   ❌ {error_msg}")
+                    results["errors"].append(error_msg)
             
             # Remove from router index
             await remove_from_router_index(frontend_path, module_name)
-            print("   ✓ Removed from router/index.js")
+            print("   ✓ Removed from router/index.ts")
         
         print("\n✅ Module deletion complete!\n")
         return results

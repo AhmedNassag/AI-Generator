@@ -14,8 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer
 from PyQt5.QtGui import QFont, QIcon, QColor, QTextCursor
 import fullstack_generator
-import asyncio
-
+from loader_manager import LoaderManager
 # Try to import ClickUp integration if available
 try:
     from ClickUpIntegration import get_task
@@ -31,29 +30,6 @@ try:
 except ImportError:
     LLM_AVAILABLE = False
     print("Note: LLMIntegaration module not available")
-
-# Create synchronous wrapper functions for fullstack_generator async functions
-def process_batch_module_sync(module_config, backend_path, frontend_path, gen_backend, gen_frontend):
-    """Synchronous wrapper for process_batch_module"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(fullstack_generator.process_batch_module(
-            module_config, backend_path, frontend_path, gen_backend, gen_frontend
-        ))
-    finally:
-        loop.close()
-
-def delete_module_sync(backend_path, frontend_path, module_name, delete_backend=True, delete_frontend=True):
-    """Synchronous wrapper for delete_module"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(fullstack_generator.delete_module(
-            backend_path, frontend_path, module_name, delete_backend, delete_frontend
-        ))
-    finally:
-        loop.close()
 
 class GenerationThread(QThread):
     """Thread for running generation tasks"""
@@ -76,12 +52,11 @@ class GenerationThread(QThread):
                 self.ai_clickup_generate()
             elif self.task_type == "delete":
                 self.delete_module()
-                
         except Exception as e:
             self.log_signal.emit(f"❌ Error: {str(e)}")
             self.log_signal.emit(traceback.format_exc())
             self.finished_signal.emit(False, str(e))
-    
+            
     def create_module(self):
         """Create a single module"""
         self.log_signal.emit("Starting module creation...")
@@ -106,14 +81,24 @@ class GenerationThread(QThread):
         
         # Process module
         self.log_signal.emit(f"Processing module: {self.kwargs.get('module_name')}")
-        result = process_batch_module_sync(
+        import inspect, asyncio
+        process_func = fullstack_generator.process_batch_module
+        args = (
             config["modules"][0],
             self.kwargs.get("backend_path"),
             self.kwargs.get("frontend_path"),
             self.kwargs.get("gen_backend", True),
             self.kwargs.get("gen_frontend", True)
         )
-        
+        if inspect.iscoroutinefunction(process_func):
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(process_func(*args))
+        else:
+            result = process_func(*args)
         if result["success"]:
             self.log_signal.emit("✅ Module created successfully!")
             self.finished_signal.emit(True, "Module created successfully")
@@ -143,19 +128,28 @@ class GenerationThread(QThread):
             results = []
             total = len(config.get("modules", []))
             
+            import inspect, asyncio
+            process_func = fullstack_generator.process_batch_module
             for i, module in enumerate(config.get("modules", []), 1):
                 self.log_signal.emit(f"\n📝 [{i}/{total}] Processing: {module['name']}")
                 self.progress_signal.emit(int((i / total) * 100))
-                
-                result = process_batch_module_sync(
+                args = (
                     module,
                     self.kwargs.get("backend_path"),
                     self.kwargs.get("frontend_path"),
                     self.kwargs.get("gen_backend", True),
                     self.kwargs.get("gen_frontend", True)
                 )
+                if inspect.iscoroutinefunction(process_func):
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(process_func(*args))
+                else:
+                    result = process_func(*args)
                 results.append(result)
-                
                 if result["success"]:
                     self.log_signal.emit(f"✅ {module['name']} generated successfully")
                 else:
@@ -222,17 +216,27 @@ class GenerationThread(QThread):
             results = []
             total = len(parsed_config["modules"])
             
+            import inspect, asyncio
+            process_func = fullstack_generator.process_batch_module
             for i, module in enumerate(parsed_config["modules"], 1):
                 self.log_signal.emit(f"\n📝 [{i}/{total}] Processing: {module.get('name', 'Unnamed')}")
                 self.progress_signal.emit(int((i / total) * 100))
-                
-                result = process_batch_module_sync(
+                args = (
                     module,
                     self.kwargs.get("backend_path"),
                     self.kwargs.get("frontend_path"),
                     True,
                     True
                 )
+                if inspect.iscoroutinefunction(process_func):
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    result = loop.run_until_complete(process_func(*args))
+                else:
+                    result = process_func(*args)
                 results.append(result)
             
             # Summary
@@ -254,13 +258,36 @@ class GenerationThread(QThread):
         self.log_signal.emit(f"Deleting module: {self.kwargs.get('module_name')}")
         
         try:
-            results = delete_module_sync(
-                self.kwargs.get("backend_path"),
-                self.kwargs.get("frontend_path"),
-                self.kwargs.get("module_name"),
-                self.kwargs.get("delete_backend", True),
-                self.kwargs.get("delete_frontend", True)
-            )
+            import inspect, asyncio
+            
+            # احصل على دالة الحذف من الموديول
+            delete_func = fullstack_generator.delete_module
+            
+            # تحقق إذا كانت الدالة async أم لا
+            if inspect.iscoroutinefunction(delete_func):
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # استدعاء الدالة async
+                results = loop.run_until_complete(delete_func(
+                    self.kwargs.get("backend_path"),
+                    self.kwargs.get("frontend_path"),
+                    self.kwargs.get("module_name"),
+                    self.kwargs.get("delete_backend", True),
+                    self.kwargs.get("delete_frontend", True)
+                ))
+            else:
+                # إذا لم تكن async، استدعها بشكل عادي
+                results = delete_func(
+                    self.kwargs.get("backend_path"),
+                    self.kwargs.get("frontend_path"),
+                    self.kwargs.get("module_name"),
+                    self.kwargs.get("delete_backend", True),
+                    self.kwargs.get("delete_frontend", True)
+                )
             
             self.log_signal.emit("✅ Module deletion complete!")
             self.finished_signal.emit(True, "Module deleted successfully")
@@ -268,12 +295,6 @@ class GenerationThread(QThread):
         except Exception as e:
             self.log_signal.emit(f"❌ Deletion error: {str(e)}")
             self.finished_signal.emit(False, str(e))
-
-# [Rest of the code remains exactly the same from FieldDialog class to the end...]
-# Keep all the other classes (FieldDialog, RelationshipDialog, ModuleCreationTab, 
-# BatchModeTab, AIClickUpTab, DeleteModuleTab, MainWindow) exactly as they were
-# in your original code, starting from line where FieldDialog is defined...
-
 class FieldDialog(QDialog):
     """Dialog for editing a field"""
     def __init__(self, field_data=None, parent=None):
@@ -435,26 +456,41 @@ class FieldDialog(QDialog):
                 self.static_options_table.removeRow(row)
     
     def load_existing_options(self):
-        """Load existing options from field data"""
-        if "options" in self.field_data and self.field_data["options"]:
-            self.options_type.setCurrentText("Static")
-            for opt in self.field_data["options"]:
-                row = self.static_options_table.rowCount()
-                self.static_options_table.insertRow(row)
-                self.static_options_table.setItem(row, 0, QTableWidgetItem(str(opt.get("id", ""))))
-                self.static_options_table.setItem(row, 1, QTableWidgetItem(str(opt.get("name", ""))))
-        
-        elif self.field_data.get("isDynamic", False):
-            self.options_type.setCurrentText("Dynamic")
-            self.dynamic_module.setText(self.field_data.get("moduleName", ""))
-            self.dynamic_option_label.setText(self.field_data.get("optionLabel", "name"))
-            self.dynamic_option_value.setText(self.field_data.get("optionValue", "id"))
-    
+            """Load existing options into the table."""
+            self.static_options_table.setRowCount(0)
+            
+            options = self.field_data.get("options")
+            
+            if not options:
+                return
+            
+            # إذا كان options سلسلة نصية (مثل "User")
+            if isinstance(options, str):
+                # تحويل السلسلة إلى قائمة بقاموس واحد
+                options = [{"id": options.lower(), "name": options}]
+            
+            # إذا كان options قائمة
+            if isinstance(options, list):
+                for row, opt in enumerate(options):
+                    self.static_options_table.insertRow(row)
+                    
+                    # إذا كان العنصر قاموساً
+                    if isinstance(opt, dict):
+                        self.static_options_table.setItem(row, 0, QTableWidgetItem(str(opt.get("id", ""))))
+                        self.static_options_table.setItem(row, 1, QTableWidgetItem(str(opt.get("name", ""))))
+                    # إذا كان العنصر سلسلة نصية
+                    elif isinstance(opt, str):
+                        self.static_options_table.setItem(row, 0, QTableWidgetItem(opt.lower()))
+                        self.static_options_table.setItem(row, 1, QTableWidgetItem(opt))
+                    # إذا كان العنصر أي نوع آخر
+                    else:
+                        self.static_options_table.setItem(row, 0, QTableWidgetItem(str(opt)))
+                        self.static_options_table.setItem(row, 1, QTableWidgetItem(str(opt)))
+                
     def get_field_data(self):
         """Get field configuration from dialog"""
         field_type = self.field_type.currentText()
         field_info = fullstack_generator.FIELD_TYPES.get(field_type, {})
-        
         data = {
             "name": self.field_name.text(),
             "type": field_type,
@@ -463,11 +499,9 @@ class FieldDialog(QDialog):
             "col": self.col_span.value(),
             "formType": field_info.get("formType", "text")
         }
-        
         # Add options if applicable
         if field_info.get("hasOptions", False):
             data["multiple"] = self.multiple_checkbox.isChecked()
-            
             if self.options_type.currentText() == "Static":
                 options = []
                 for row in range(self.static_options_table.rowCount()):
@@ -481,11 +515,15 @@ class FieldDialog(QDialog):
                 if options:
                     data["options"] = options
             else:
+                # Dynamic options: set options to moduleName for frontend compatibility
+                module_name = self.dynamic_module.text()
                 data["isDynamic"] = True
-                data["moduleName"] = self.dynamic_module.text()
+                data["moduleName"] = module_name
                 data["optionLabel"] = self.dynamic_option_label.text()
                 data["optionValue"] = self.dynamic_option_value.text()
-        
+                # For frontend, set 'options' to moduleName if present
+                if module_name:
+                    data["options"] = module_name
         return data
 
 class RelationshipDialog(QDialog):
@@ -856,7 +894,8 @@ class ModuleCreationTab(QWidget):
         if not self.fields:
             QMessageBox.warning(self, "Warning", "Please add at least one field!")
             return
-            
+        
+        LoaderManager.show_loader(self.window(), "Creating module...")   
         # Get main window
         main_window = self.window()
         if hasattr(main_window, 'start_generation'):
@@ -1127,6 +1166,8 @@ class BatchModeTab(QWidget):
             QMessageBox.warning(self, "Warning", "Please provide JSON configuration!")
             return
             
+        LoaderManager.show_loader(self.window(), "Processing batch generation...")
+        
         # Get main window
         main_window = self.window()
         if hasattr(main_window, 'start_generation'):
@@ -1277,7 +1318,9 @@ class AIClickUpTab(QWidget):
         if not task_id:
             QMessageBox.warning(self, "Warning", "Please enter a ClickUp Task ID!")
             return
-            
+           
+        LoaderManager.show_loader(self.window(), "Fetching ClickUp task...")
+         
         # Get main window to log
         main_window = self.window()
         if hasattr(main_window, 'log_output'):
@@ -1290,10 +1333,13 @@ class AIClickUpTab(QWidget):
             
             if hasattr(main_window, 'log_output'):
                 main_window.log_output.append(f"✅ Task fetched successfully")
+                LoaderManager.hide_loader()
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to fetch task:\n{str(e)}")
+            LoaderManager.hide_loader()
             if hasattr(main_window, 'log_output'):
+                LoaderManager.hide_loader()
                 main_window.log_output.append(f"❌ Failed to fetch task: {str(e)}")
                 
     def generate_ai_config(self):
@@ -1303,6 +1349,8 @@ class AIClickUpTab(QWidget):
             QMessageBox.warning(self, "Warning", "No task data to process!")
             return
             
+        LoaderManager.show_loader(self.window(), "Generating AI configuration...")
+        
         # Get main window to log
         main_window = self.window()
         if hasattr(main_window, 'log_output'):
@@ -1324,7 +1372,9 @@ class AIClickUpTab(QWidget):
             QMessageBox.critical(self, "Error", f"AI generation failed:\n{str(e)}")
             if hasattr(main_window, 'log_output'):
                 main_window.log_output.append(f"❌ AI generation failed: {str(e)}")
-                
+        
+        LoaderManager.hide_loader()
+        
     def save_config(self):
         """Save AI-generated configuration to file"""
         config_text = self.config_preview.toPlainText()
@@ -1351,6 +1401,8 @@ class AIClickUpTab(QWidget):
             QMessageBox.warning(self, "Warning", "No AI configuration available!")
             return
             
+        LoaderManager.show_loader(self.window(), "Starting AI generation...")
+        
         # Get main window
         main_window = self.window()
         if hasattr(main_window, 'start_generation'):
@@ -1484,6 +1536,8 @@ class DeleteModuleTab(QWidget):
         
         if reply == QMessageBox.Yes:
             # Get main window
+            LoaderManager.show_loader(self.window(), "Deleting module...")
+            
             main_window = self.window()
             if hasattr(main_window, 'start_generation'):
                 main_window.start_generation(
@@ -1504,7 +1558,7 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("🚀 Full Stack Module Generator GUI")
-        self.setGeometry(100, 100, 1000, 700)  # Reduced size to avoid geometry warning
+        self.setGeometry(100, 100, 1200, 800)
         
         # Create central widget
         central_widget = QWidget()
@@ -1672,6 +1726,8 @@ class MainWindow(QMainWindow):
     
     def start_generation(self, task_type, **kwargs):
         """Start a generation task in a separate thread"""
+        # Show loader
+        LoaderManager.show_loader(self, "Generating...")
         # Disable UI elements
         self.tabs.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -1684,12 +1740,19 @@ class MainWindow(QMainWindow):
         # Create and start thread
         self.generation_thread = GenerationThread(task_type, **kwargs)
         self.generation_thread.log_signal.connect(self.log_message)
+        self.generation_thread.progress_signal.connect(self.on_progress_update)
         self.generation_thread.progress_signal.connect(self.progress_bar.setValue)
         self.generation_thread.finished_signal.connect(self.generation_finished)
         self.generation_thread.start()
-        
+    def on_progress_update(self, value):
+        """Update progress in both progress bar and loader"""
+        self.progress_bar.setValue(value)
+        LoaderManager.update_progress(value)
     def generation_finished(self, success, message):
         """Handle generation completion"""
+        # Hide loader with delay for smooth transition
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(500, LoaderManager.hide_loader)
         # Re-enable UI
         self.tabs.setEnabled(True)
         self.progress_bar.setVisible(False)

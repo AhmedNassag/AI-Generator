@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from "vue-router";
-
 import BodyView from "@/layout/bodyView.vue";
 import indexDashboard from "@/pages/indexDashboard.vue";
 import UserReport from "@/router/modules/UserReport/UserReport";
@@ -29,13 +28,11 @@ import EmailConfig from "@/router/modules/EmailConfig/EmailConfig";
 import Cookies from "js-cookie";
 import Errors from "./modules/Errors/Errors";
 import { useTranslations } from "@/composables/useTranslations";
-
 declare global {
   interface Window {
     routerData?: string;
   }
 }
-
 const routes: Array<RouteRecordRaw> = [
   {
     path: "/",
@@ -56,7 +53,7 @@ const routes: Array<RouteRecordRaw> = [
       ...Location,
       ...User,
       ...Color,
-      // ...Position,
+      ...Position,
       ...Team,
       ...Permission,
       ...Job,
@@ -81,18 +78,15 @@ const routes: Array<RouteRecordRaw> = [
   ...Errors,
   ...AuthRoute,
 ];
-
 const router = createRouter({
   history: createWebHistory(process.env.BASE_URL),
   routes,
 });
-
 // Utility functions
 function getCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return match ? decodeURIComponent(match[2]) : null;
 }
-
 function base64UrlDecode(base64Url: string): string {
   let base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
   const padding = base64.length % 4;
@@ -101,7 +95,6 @@ function base64UrlDecode(base64Url: string): string {
   }
   return atob(base64);
 }
-
 function decodeJWT(token: string) {
   const parts = token.split(".");
   if (parts.length !== 3) {
@@ -111,7 +104,6 @@ function decodeJWT(token: string) {
   const payload = JSON.parse(base64UrlDecode(parts[1]));
   return { header, payload };
 }
-
 // Function to get JWT token from cookies
 function getTokenFromCookies(): string {
   let token = "";
@@ -122,7 +114,6 @@ function getTokenFromCookies(): string {
   }
   return token;
 }
-
 // Routes that don't require authentication
 const publicRoutes = [
   "Login",
@@ -134,7 +125,6 @@ const publicRoutes = [
   "SurveyAnswerOut",
   "PreviewWebsitePage",
 ];
-
 // Routes that bypass mandatory course check
 const courseExemptRoutes = [
   "UserLmsTrainingModule",
@@ -142,13 +132,10 @@ const courseExemptRoutes = [
   "SurveyAnswer",
   "SurveyAnswerOut",
 ];
-
 // Load translations before each route if mainTrKeys meta is present
 // const SHARED_MODULES = ["common", "datatable", "menu", "notification"];
-
 // router.beforeEach(async (to, from, next) => {
 //   const modules: any = to.meta.mainTrKeys || [];
-
 //   if (modules?.length == 0) {
 //     const routeName: any = to?.name?.toString()?.toLocaleLowerCase();
 //     //if the name is committe Details , delete the Details part
@@ -165,10 +152,8 @@ const courseExemptRoutes = [
 //       console.error("Failed to load translations:", error);
 //     }
 //   }
-
 //   next();
 // });
-
 // Main authentication guard
 router.beforeEach(async (to, from, next) => {
   try {
@@ -180,34 +165,28 @@ router.beforeEach(async (to, from, next) => {
     ) {
       return next();
     }
-
     // Check if user is authenticated
     const isAuthenticated = await Auth.loggedIn();
-
     if (
       isAuthenticated &&
       (to.name === "Login" || to.name === "ForgotPassword")
     ) {
       return next({ name: "home" });
     }
-
     // Allow public routes without authentication
     if (publicRoutes.includes(to.name as string)) {
       return next();
     }
-
     if (!isAuthenticated) {
       console.log("User not authenticated, redirecting to login");
       return next({ name: "Login" });
     }
-
     // Get JWT token
     const token = getTokenFromCookies();
     if (!token) {
       console.log("No token found, redirecting to login");
       return next({ name: "Login" });
     }
-
     // Decode JWT token
     let decodedToken;
     try {
@@ -216,7 +195,6 @@ router.beforeEach(async (to, from, next) => {
       console.error("Error decoding token:", error);
       return next({ name: "Login" });
     }
-
     // Check for mandatory courses (unless it's a course exempt route)
     // if (!courseExemptRoutes.includes(to.name as string)) {
     //   const response = await api.checkMandatoryModules(Auth.USER.id);
@@ -230,7 +208,6 @@ router.beforeEach(async (to, from, next) => {
     //     return next({ name: "UserLmsTrainingModule" });
     //   }
     // }
-
     // Check if user is super admin
     if (decodedToken.payload.super === true) {
       // Super admin has access to all routes
@@ -254,10 +231,8 @@ router.beforeEach(async (to, from, next) => {
         return next({ name: "NotFound" });
       }
     }
-
     // Regular user - check permissions
     const permissions = decodedToken.payload.permission || [];
-
     if (to.matched && to.matched.length > 1) {
       const component = to.matched[1];
       if (component && component.name && typeof component.name === "string") {
@@ -268,7 +243,6 @@ router.beforeEach(async (to, from, next) => {
           .join("\\")
           .split("\\:id")
           .join("");
-
         // Special cases that don't require permission check
         if (
           courseExemptRoutes.includes(to.name as string) ||
@@ -301,12 +275,10 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: "Login" });
   }
 });
-
 // Update document title based on route meta
 router.beforeEach((to) => {
   if (typeof to.meta?.title === "string") {
     document.title = to.meta.title;
   }
 });
-
 export default router;
